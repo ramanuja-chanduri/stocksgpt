@@ -11,8 +11,9 @@ class MessageRole(str, Enum):
 
 
 class ModelType(str, Enum):
-    GPT_4O = "gpt-4o"
-    GEMINI_2_0_FLASH = "gemini-2.0-flash"
+    GROQ_LLAMA = "meta-llama/llama-4-scout-17b-16e-instruct"  # Groq model
+    GEMINI_3_FLASH = "gemini-3-flash-preview"  # Gemini model
+    # GPT_4O = "gpt-4o"  # Disabled - using Groq instead
 
 
 class SessionCreate(BaseModel):
@@ -33,7 +34,7 @@ class MessageCreate(BaseModel):
     content: str
     session_id: str
     model_preferences: Optional[List[ModelType]] = Field(
-        default=[ModelType.GPT_4O, ModelType.GEMINI_2_0_FLASH],
+        default=[ModelType.GROQ_LLAMA, ModelType.GEMINI_3_FLASH],  # Both models
         description="Which models to query"
     )
     file_ids: Optional[List[str]] = Field(default=[], description="Attached file IDs")
@@ -68,8 +69,8 @@ class ChatRequest(BaseModel):
     message: str
     session_id: Optional[str] = None
     model_preferences: List[str] = Field(
-        default=["gpt-4o", "gemini-2.0-flash"],
-        description="Which models to query: 'gpt-4o', 'gemini-2.0-flash', or both"
+        default=["meta-llama/llama-4-scout-17b-16e-instruct", "gemini-3-flash-preview"],  # Both models
+        description="Which models to query: 'meta-llama/llama-4-scout-17b-16e-instruct' (Groq) or 'gemini-3-flash-preview' (Gemini)"
     )
     file_ids: Optional[List[str]] = Field(default=[])
 

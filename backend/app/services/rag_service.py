@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 from langchain_community.vectorstores import FAISS
-from langchain_openai import OpenAIEmbeddings
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document
 from app.core.config import settings
@@ -23,11 +23,18 @@ class RAGService:
         )
     
     def _initialize_embeddings(self):
-        """Initialize embeddings model"""
-        if settings.OPENAI_API_KEY:
-            self.embeddings = OpenAIEmbeddings(
+        """Initialize embeddings model using Google Generative AI (Gemini)"""
+        if settings.GEMINI_API_KEY:
+            import os
+            # Set environment variables for compatibility with LangChain
+            if not os.getenv("GEMINI_API_KEY"):
+                os.environ["GEMINI_API_KEY"] = settings.GEMINI_API_KEY
+            if not os.getenv("GOOGLE_API_KEY"):
+                os.environ["GOOGLE_API_KEY"] = settings.GEMINI_API_KEY
+            
+            self.embeddings = GoogleGenerativeAIEmbeddings(
                 model=settings.EMBEDDING_MODEL,
-                api_key=settings.OPENAI_API_KEY
+                task_type="RETRIEVAL_DOCUMENT"  # Optimized for document retrieval
             )
     
     def _load_vectorstore(self):

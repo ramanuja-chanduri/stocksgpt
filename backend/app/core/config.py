@@ -6,19 +6,20 @@ from pathlib import Path
 
 class Settings(BaseSettings):
     # API Keys
-    OPENAI_API_KEY: str = ""
-    GOOGLE_API_KEY: str = ""
+    GROQ_API_KEY: str = "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"  # Groq API key for llama model
+    GEMINI_API_KEY: str = "AIzaSyDrRGDfMrLPmvOAWg52cd9vEPwpvnEYVRg"  # Google API key for Gemini model
+    # OPENAI_API_KEY: str = ""  # Disabled - using Groq instead
     
-    # Cloud Storage
-    AWS_ACCESS_KEY_ID: str = ""
-    AWS_SECRET_ACCESS_KEY: str = ""
-    AWS_REGION: str = "us-east-1"
-    S3_BUCKET_NAME: str = ""
+    # Cloud Storage - Disabled, using local storage only
+    # AWS_ACCESS_KEY_ID: str = ""  # Removed - using local storage
+    # AWS_SECRET_ACCESS_KEY: str = ""  # Removed - using local storage
+    # AWS_REGION: str = "us-east-1"  # Removed - using local storage
+    # S3_BUCKET_NAME: str = ""  # Removed - using local storage
     
-    # Alternative: GCP Storage
-    GCP_PROJECT_ID: str = ""
-    GCP_STORAGE_BUCKET: str = ""
-    USE_GCP: bool = False  # Set to True to use GCP instead of AWS
+    # Alternative: GCP Storage - Commented out, using local storage
+    # GCP_PROJECT_ID: str = ""
+    # GCP_STORAGE_BUCKET: str = ""
+    # USE_GCP: bool = False  # Set to True to use GCP instead of AWS
     
     # API Keys for Tools
     TAVILY_API_KEY: str = ""
@@ -42,14 +43,15 @@ class Settings(BaseSettings):
     
     # Vector Store
     VECTOR_STORE_PATH: str = "./vectorstore"
-    EMBEDDING_MODEL: str = "text-embedding-3-small"
+    EMBEDDING_MODEL: str = "models/gemini-embedding-001"  # Google Gemini embedding model
     
     # Session Management
     SESSION_TIMEOUT_HOURS: int = 24
     
     # LLM Models
-    GPT_MODEL: str = "gpt-4o"
-    GEMINI_MODEL: str = "gemini-2.0-flash-exp"
+    GROQ_MODEL: str = "meta-llama/llama-4-scout-17b-16e-instruct"  # Groq model
+    GEMINI_MODEL: str = "gemini-3-flash-preview"  # Gemini model
+    # GPT_MODEL: str = "gpt-4o"  # Disabled - using Groq instead
     
     class Config:
         env_file = ".env"

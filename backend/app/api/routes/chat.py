@@ -62,9 +62,9 @@ async def chat_endpoint(
             if msg.message_id != user_message.message_id  # Exclude current message
         ]
         
-        # Determine which models to call
-        call_gpt = "gpt-4o" in request.model_preferences
-        call_gemini = "gemini-2.0-flash" in request.model_preferences
+        # Determine which models to call (Groq and Gemini)
+        call_groq = "meta-llama/llama-4-scout-17b-16e-instruct" in request.model_preferences or "groq-llama" in request.model_preferences or len(request.model_preferences) == 0
+        call_gemini = "gemini-3-flash-preview" in request.model_preferences or "gemini-3-flash" in request.model_preferences
         
         responses = []
         
@@ -76,17 +76,17 @@ async def chat_endpoint(
             history=history
         )
         
-        # Save GPT response
-        if call_gpt and workflow_result.get("gpt_response"):
-            gpt_message = models.Message(
+        # Save Groq response
+        if call_groq and workflow_result.get("gpt_response"):
+            groq_message = models.Message(
                 session_id=session.session_id,
                 role="assistant_gpt",
                 content=workflow_result["gpt_response"],
-                model="gpt-4o"
+                model="meta-llama/llama-4-scout-17b-16e-instruct"  # Groq model
             )
-            db.add(gpt_message)
+            db.add(groq_message)
             await db.flush()
-            responses.append(MessageResponse.model_validate(gpt_message))
+            responses.append(MessageResponse.model_validate(groq_message))
         
         # Save Gemini response
         if call_gemini and workflow_result.get("gemini_response"):
@@ -94,7 +94,7 @@ async def chat_endpoint(
                 session_id=session.session_id,
                 role="assistant_gemini",
                 content=workflow_result["gemini_response"],
-                model="gemini-2.0-flash"
+                model="gemini-3-flash-preview"  # Gemini model
             )
             db.add(gemini_message)
             await db.flush()
@@ -133,7 +133,7 @@ async def chat_stream(websocket: WebSocket):
             
             message = request_data.get("message")
             session_id = request_data.get("session_id")
-            model_preferences = request_data.get("model_preferences", ["gpt-4o", "gemini-2.0-flash"])
+            model_preferences = request_data.get("model_preferences", ["meta-llama/llama-4-scout-17b-16e-instruct", "gemini-3-flash-preview"])
             
             if not message:
                 await websocket.send_json({"error": "Message is required"})
@@ -142,27 +142,27 @@ async def chat_stream(websocket: WebSocket):
             # Get or create session (simplified for WebSocket)
             # In production, you'd want to properly handle this
             
-            call_gpt = "gpt-4o" in model_preferences
-            call_gemini = "gemini-2.0-flash" in model_preferences
+            call_groq = "meta-llama/llama-4-scout-17b-16e-instruct" in model_preferences or "groq-llama" in model_preferences or len(model_preferences) == 0
+            call_gemini = "gemini-3-flash-preview" in model_preferences or "gemini-3-flash" in model_preferences
             
             # Prepare messages
             messages = llm_service.prepare_messages(message)
             
             # Stream responses
-            if call_gpt:
+            if call_groq:
                 message_id = str(uuid.uuid4())
                 async for chunk in llm_service.call_gpt(messages, stream=True):
                     await websocket.send_json({
                         "session_id": session_id or "new",
                         "message_id": message_id,
-                        "model": "gpt-4o",
+                        "model": "meta-llama/llama-4-scout-17b-16e-instruct",  # Groq model
                         "content": chunk,
                         "done": False
                     })
                 await websocket.send_json({
                     "session_id": session_id or "new",
                     "message_id": message_id,
-                    "model": "gpt-4o",
+                    "model": "meta-llama/llama-4-scout-17b-16e-instruct",  # Groq model
                     "content": "",
                     "done": True
                 })
@@ -173,14 +173,14 @@ async def chat_stream(websocket: WebSocket):
                     await websocket.send_json({
                         "session_id": session_id or "new",
                         "message_id": message_id,
-                        "model": "gemini-2.0-flash",
+                        "model": "gemini-3-flash-preview",  # Gemini model
                         "content": chunk,
                         "done": False
                     })
                 await websocket.send_json({
                     "session_id": session_id or "new",
                     "message_id": message_id,
-                    "model": "gemini-2.0-flash",
+                    "model": "gemini-3-flash-preview",  # Gemini model
                     "content": "",
                     "done": True
                 })

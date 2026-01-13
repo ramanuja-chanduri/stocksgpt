@@ -26,7 +26,7 @@ class Message(Base):
     session_id = Column(String, ForeignKey("sessions.session_id"), nullable=False)
     role = Column(String, nullable=False)  # 'user', 'assistant_gpt', 'assistant_gemini'
     content = Column(Text, nullable=False)
-    model = Column(String, nullable=True)  # 'gpt-4o', 'gemini-2.0-flash'
+    model = Column(String, nullable=True)  # 'meta-llama/llama-4-scout-17b-16e-instruct' (Groq), 'gemini-3-flash-preview' (Gemini)
     created_at = Column(DateTime, default=func.now(), nullable=False)
     
     # Relationships

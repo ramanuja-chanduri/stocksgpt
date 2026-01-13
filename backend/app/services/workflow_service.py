@@ -1,29 +1,36 @@
-from typing import Dict, List, Any, Optional, TypedDict
+from typing import Dict, List, Any, Optional, TypedDict, Annotated
 from langgraph.graph import StateGraph, END
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from app.services.llm_service import llm_service
-from app.services.tool_service import get_financial_tools
+# from app.services.tool_service import get_financial_tools  # Disabled for now
 from app.services.rag_service import rag_service
 import asyncio
 
 
+def add_messages(left: List[BaseMessage], right: List[BaseMessage]) -> List[BaseMessage]:
+    """Reducer function for messages - combines message lists"""
+    return left + right
+
+
 class WorkflowState(TypedDict):
-    messages: List[BaseMessage]
+    messages: Annotated[List[BaseMessage], add_messages]
     user_query: str
     tool_results: List[Dict[str, Any]]
     gpt_response: Optional[str]
     gemini_response: Optional[str]
     session_id: str
+    model_preferences: List[str]
 
 
 class WorkflowService:
     """Service for managing LangGraph workflows"""
     
     def __init__(self):
-        self.tools = get_financial_tools()
+        # self.tools = get_financial_tools()  # Disabled for now
+        self.tools = None  # Tools disabled for now
         self.graph = self._create_graph()
     
-    def _create_graph(self) -> StateGraph:
+    def _create_graph(self):
         """Create LangGraph workflow"""
         workflow = StateGraph(WorkflowState)
         
@@ -43,7 +50,7 @@ class WorkflowService:
         
         return workflow.compile()
     
-    async def _retrieve_context_node(self, state: WorkflowState) -> WorkflowState:
+    async def _retrieve_context_node(self, state: WorkflowState) -> Dict[str, Any]:
         """Retrieve relevant context using RAG"""
         query = state["user_query"]
         
@@ -51,42 +58,67 @@ class WorkflowService:
         context_results = await rag_service.search(query, k=3)
         
         # Add context to messages if available
+        new_messages = []
         if context_results:
             context_text = "\n".join([r["content"] for r in context_results])
             context_message = f"Relevant context:\n{context_text}\n\nUser query: {query}"
-            state["messages"].append(SystemMessage(content=context_message))
+            new_messages.append(SystemMessage(content=context_message))
         
-        return state
+        # Return only the fields we're updating
+        return {"messages": new_messages}
     
-    async def _call_gpt_node(self, state: WorkflowState) -> WorkflowState:
-        """Call GPT model"""
+    async def _call_gpt_node(self, state: WorkflowState) -> Dict[str, Any]:
+        """Call GPT model (Groq/Llama)"""
+        # Check if Groq/Llama should be called
+        model_prefs = state.get("model_preferences", [])
+        call_groq = (
+            "meta-llama/llama-4-scout-17b-16e-instruct" in model_prefs 
+            or "groq-llama" in model_prefs 
+            or len(model_prefs) == 0
+        )
+        
+        if not call_groq:
+            return {"gpt_response": None}
+        
         try:
             messages = state["messages"]
             response_chunks = []
             
-            async for chunk in llm_service.call_gpt(messages, tools=self.tools, stream=True):
+            async for chunk in llm_service.call_gpt(messages, tools=None, stream=True):  # tools=self.tools disabled
                 response_chunks.append(chunk)
             
-            state["gpt_response"] = "".join(response_chunks)
+            gpt_response = "".join(response_chunks)
         except Exception as e:
-            state["gpt_response"] = f"Error: {str(e)}"
+            gpt_response = f"Error: {str(e)}"
         
-        return state
+        # Return only the fields we're updating (not messages)
+        return {"gpt_response": gpt_response}
     
-    async def _call_gemini_node(self, state: WorkflowState) -> WorkflowState:
+    async def _call_gemini_node(self, state: WorkflowState) -> Dict[str, Any]:
         """Call Gemini model"""
+        # Check if Gemini should be called
+        model_prefs = state.get("model_preferences", [])
+        call_gemini = (
+            "gemini-3-flash-preview" in model_prefs 
+            or "gemini-3-flash" in model_prefs
+        )
+        
+        if not call_gemini:
+            return {"gemini_response": None}
+        
         try:
             messages = state["messages"]
             response_chunks = []
             
-            async for chunk in llm_service.call_gemini(messages, tools=self.tools, stream=True):
+            async for chunk in llm_service.call_gemini(messages, tools=None, stream=True):  # tools=self.tools disabled
                 response_chunks.append(chunk)
             
-            state["gemini_response"] = "".join(response_chunks)
+            gemini_response = "".join(response_chunks)
         except Exception as e:
-            state["gemini_response"] = f"Error: {str(e)}"
+            gemini_response = f"Error: {str(e)}"
         
-        return state
+        # Return only the fields we're updating (not messages)
+        return {"gemini_response": gemini_response}
     
     async def execute(
         self,
@@ -96,9 +128,10 @@ class WorkflowService:
         history: Optional[List[Dict[str, str]]] = None
     ) -> Dict[str, Any]:
         """Execute workflow"""
-        # Prepare messages
-        system_prompt = """You are a financial analysis assistant. Help users with stock market queries, 
-        financial analysis, and market research. Use available tools to fetch real-time data when needed."""
+        # Prepare messages with a more general system prompt
+        system_prompt = """You are a helpful AI assistant. Provide clear, accurate, and conversational responses to user questions. 
+        Answer questions directly and naturally - do not generate code unless explicitly requested. 
+        For factual questions, provide straightforward answers based on your knowledge."""
         
         messages = llm_service.prepare_messages(user_query, history, system_prompt)
         
@@ -109,7 +142,8 @@ class WorkflowService:
             "tool_results": [],
             "gpt_response": None,
             "gemini_response": None,
-            "session_id": session_id
+            "session_id": session_id,
+            "model_preferences": model_preferences
         }
         
         # Execute graph

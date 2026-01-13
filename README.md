@@ -99,7 +99,7 @@ stocksGPT/
    Edit `.env` and add your API keys:
    ```env
    OPENAI_API_KEY=your_openai_key
-   GOOGLE_API_KEY=your_google_key
+   GEMINI_API_KEY=your_gemini_key
    TAVILY_API_KEY=your_tavily_key  # Optional
    AWS_ACCESS_KEY_ID=your_aws_key  # Optional for file storage
    AWS_SECRET_ACCESS_KEY=your_aws_secret
