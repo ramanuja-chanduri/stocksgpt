@@ -2,12 +2,16 @@ from pydantic_settings import BaseSettings
 from typing import List
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 class Settings(BaseSettings):
-    # API Keys
-    GROQ_API_KEY: str = "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"  # Groq API key for llama model
-    GEMINI_API_KEY: str = "AIzaSyDrRGDfMrLPmvOAWg52cd9vEPwpvnEYVRg"  # Google API key for Gemini model
+    # API Keys - loaded from .env file first, then environment variables
+    # Set these in backend/.env file (do NOT hard-code real keys)
+    GROQ_API_KEY: str = os.environ["GROQ_API_KEY"]  # Groq API key for llama model
+    GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]  # Google API key for Gemini model
     # OPENAI_API_KEY: str = ""  # Disabled - using Groq instead
     
     # Cloud Storage - Disabled, using local storage only
@@ -54,8 +58,11 @@ class Settings(BaseSettings):
     # GPT_MODEL: str = "gpt-4o"  # Disabled - using Groq instead
     
     class Config:
-        env_file = ".env"
+        # Also allow pydantic-settings to read from environment variables
+        # (which will include values loaded from .env by dotenv above)
+        env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"
 
 
 settings = Settings()
