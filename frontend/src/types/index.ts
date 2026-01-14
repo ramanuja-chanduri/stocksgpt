@@ -44,4 +44,5 @@ export interface StreamingChunk {
   model: string;
   content: string;
   done: boolean;
+  error?: string;
 }

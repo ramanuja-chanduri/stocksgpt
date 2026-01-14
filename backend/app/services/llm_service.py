@@ -59,6 +59,56 @@ class LLMService:
         #         api_key=settings.OPENAI_API_KEY,
         #         streaming=True
         #     )
+
+    def _content_to_text(self, content: Any) -> str:
+        """
+        Best-effort conversion of LangChain message/chunk content to plain text.
+
+        Different providers can return:
+        - str
+        - list[str]
+        - list[dict] like [{"type": "text", "text": "..."}]
+        - dict like {"text": "..."} or {"content": "..."} (provider-specific)
+        """
+        if content is None:
+            return ""
+
+        if isinstance(content, str):
+            return content
+
+        if isinstance(content, dict):
+            # Common patterns across providers
+            if isinstance(content.get("text"), str):
+                return content["text"]
+            if isinstance(content.get("content"), str):
+                return content["content"]
+            # Fallback: stringify
+            return str(content)
+
+        if isinstance(content, list):
+            parts: List[str] = []
+            for item in content:
+                if item is None:
+                    continue
+                if isinstance(item, str):
+                    parts.append(item)
+                    continue
+                if isinstance(item, dict):
+                    if isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+                        continue
+                    if isinstance(item.get("content"), str):
+                        parts.append(item["content"])
+                        continue
+                    # Some providers nest: {"type":"text","text":"..."} etc.
+                    if isinstance(item.get("type"), str) and isinstance(item.get("text"), str):
+                        parts.append(item["text"])
+                        continue
+                # Last resort
+                parts.append(str(item))
+            return "".join(parts)
+
+        return str(content)
     
     async def call_gpt(
         self,
@@ -77,23 +127,14 @@ class LLMService:
         
         if stream:
             async for chunk in llm.astream(messages):
-                if hasattr(chunk, 'content') and chunk.content:
-                    # Ensure we yield a string
-                    content = chunk.content
-                    if isinstance(content, str):
-                        yield content
-                    elif isinstance(content, list):
-                        # If content is a list, join it or take the first string
-                        yield "".join(str(item) for item in content if isinstance(item, str))
-                    else:
-                        yield str(content)
+                if hasattr(chunk, "content") and chunk.content is not None:
+                    text = self._content_to_text(chunk.content)
+                    if text:
+                        yield text
         else:
             response = await llm.ainvoke(messages)
-            content = response.content
-            if isinstance(content, str):
-                yield content
-            else:
-                yield str(content)
+            text = self._content_to_text(getattr(response, "content", None))
+            yield text
     
     async def call_gemini(
         self,
@@ -112,23 +153,14 @@ class LLMService:
         
         if stream:
             async for chunk in llm.astream(messages):
-                if hasattr(chunk, 'content') and chunk.content:
-                    # Ensure we yield a string
-                    content = chunk.content
-                    if isinstance(content, str):
-                        yield content
-                    elif isinstance(content, list):
-                        # If content is a list, join it or take the first string
-                        yield "".join(str(item) for item in content if isinstance(item, str))
-                    else:
-                        yield str(content)
+                if hasattr(chunk, "content") and chunk.content is not None:
+                    text = self._content_to_text(chunk.content)
+                    if text:
+                        yield text
         else:
             response = await llm.ainvoke(messages)
-            content = response.content
-            if isinstance(content, str):
-                yield content
-            else:
-                yield str(content)
+            text = self._content_to_text(getattr(response, "content", None))
+            yield text
     
     async def call_both(
         self,

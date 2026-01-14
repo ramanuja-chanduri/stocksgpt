@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import SplitPane from 'react-split-pane';
 import { LLMResponsePane } from './LLMResponsePane';
 import { SearchBar } from './SearchBar';
-import { Message, FileUpload as FileUploadType } from '../types';
+import { Message, FileUpload as FileUploadType, StreamingChunk } from '../types';
 import { chatApi, filesApi } from '../services/api';
 import { wsClient } from '../services/websocket';
 import { Toggle } from './Toggle';
@@ -27,8 +27,56 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
   const [gptError, setGptError] = useState<string>();
   const [geminiError, setGeminiError] = useState<string>();
   const [uploadedFiles, setUploadedFiles] = useState<FileUploadType[]>([]);
-  const [modelPreferences, setModelPreferences] = useState<string[]>(['gpt-4o', 'gemini-2.0-flash']);
+  const [modelPreferences, setModelPreferences] = useState<string[]>([
+    'meta-llama/llama-4-scout-17b-16e-instruct',
+    'gemini-3-flash-preview',
+  ]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const activeSessionIdRef = useRef<string | null>(sessionId);
+  useEffect(() => {
+    activeSessionIdRef.current = sessionId;
+  }, [sessionId]);
+
+  // Connect WebSocket once for streaming
+  useEffect(() => {
+    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const wsUrl = apiBase.replace(/^http/, 'ws') + '/api/chat/stream';
+    wsClient.connect(wsUrl);
+
+    const offMessage = wsClient.onMessage((chunk: StreamingChunk) => {
+      if ((chunk as any).error) {
+        // Backend may send {error: "..."} for general failures
+        setGptError((chunk as any).error);
+        setGeminiError((chunk as any).error);
+        setGptLoading(false);
+        setGeminiLoading(false);
+        return;
+      }
+
+      if (chunk.model === 'meta-llama/llama-4-scout-17b-16e-instruct') {
+        if (chunk.content) setGptContent(prev => prev + chunk.content);
+        if (chunk.done) setGptLoading(false);
+        if (chunk.error) setGptError(chunk.error);
+      } else if (chunk.model === 'gemini-3-flash-preview') {
+        if (chunk.content) setGeminiContent(prev => prev + chunk.content);
+        if (chunk.done) setGeminiLoading(false);
+        if (chunk.error) setGeminiError(chunk.error);
+      }
+    });
+
+    const offError = wsClient.onError((err) => {
+      setGptError(String(err));
+      setGeminiError(String(err));
+      setGptLoading(false);
+      setGeminiLoading(false);
+    });
+
+    return () => {
+      offMessage();
+      offError();
+    };
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -45,10 +93,23 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     setGeminiContent('');
     setGptError(undefined);
     setGeminiError(undefined);
-    setGptLoading(true);
-    setGeminiLoading(true);
+    setGptLoading(modelPreferences.includes('meta-llama/llama-4-scout-17b-16e-instruct'));
+    setGeminiLoading(modelPreferences.includes('gemini-3-flash-preview'));
 
     try {
+      // If WebSocket is connected, stream to UI.
+      if (wsClient.readyState === WebSocket.OPEN) {
+        wsClient.send({
+          message,
+          session_id: sessionId || null,
+          model_preferences: modelPreferences,
+          file_ids: fileIds,
+        });
+        setUploadedFiles([]);
+        return;
+      }
+
+      // Fallback to non-streaming HTTP if WS isn't available.
       const response = await chatApi.send({
         message,
         session_id: sessionId || undefined,
@@ -60,7 +121,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         onSessionCreated(response.session_id);
       }
 
-      // Update content from responses
       response.responses.forEach((msg: Message) => {
         if (msg.role === 'assistant_gpt') {
           setGptContent(msg.content);
@@ -72,7 +132,6 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         onNewMessage(msg);
       });
 
-      // Clear uploaded files after sending
       setUploadedFiles([]);
     } catch (error: any) {
       setGptError(error.response?.data?.detail || error.message);
@@ -107,16 +166,16 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
     }
   };
 
-  const showGpt = modelPreferences.includes('gpt-4o');
-  const showGemini = modelPreferences.includes('gemini-2.0-flash');
+  const showGpt = modelPreferences.includes('meta-llama/llama-4-scout-17b-16e-instruct');
+  const showGemini = modelPreferences.includes('gemini-3-flash-preview');
 
   return (
     <div className="flex flex-col h-full">
       <div className="p-4 border-b">
         <Toggle
           options={[
-            { value: 'gpt-4o', label: 'GPT-4o' },
-            { value: 'gemini-2.0-flash', label: 'Gemini 2.0' },
+            { value: 'meta-llama/llama-4-scout-17b-16e-instruct', label: 'Llama (Groq)' },
+            { value: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
           ]}
           selected={modelPreferences}
           onChange={setModelPreferences}
@@ -158,20 +217,20 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
           <div className="grid grid-cols-2 gap-4 mb-4" style={{ minHeight: '200px' }}>
             {showGpt && (
               <LLMResponsePane
-                title="GPT-4o"
+                title="Llama (Groq)"
                 content={gptContent}
                 isLoading={gptLoading}
                 error={gptError}
-                model="gpt-4o"
+                model="meta-llama/llama-4-scout-17b-16e-instruct"
               />
             )}
             {showGemini && (
               <LLMResponsePane
-                title="Gemini 2.0 Flash"
+                title="Gemini 3 Flash"
                 content={geminiContent}
                 isLoading={geminiLoading}
                 error={geminiError}
-                model="gemini-2.0-flash"
+                model="gemini-3-flash-preview"
               />
             )}
           </div>
