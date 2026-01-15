@@ -2,10 +2,13 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from sqlalchemy.orm import declarative_base
 from sqlalchemy import text
 from app.core.config import settings
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.DEBUG,
+    echo=False,  # Disabled - we handle logging separately
     future=True
 )
 
@@ -24,8 +27,9 @@ async def get_db():
         try:
             yield session
             await session.commit()
-        except Exception:
+        except Exception as e:
             await session.rollback()
+            logger.error(f"Database session error, rolling back: {e}", exc_info=True)
             raise
         finally:
             await session.close()
@@ -42,4 +46,5 @@ async def init_db():
         # Verify tables exist
         result = await conn.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         tables = result.fetchall()
-        print(f"Database initialized. Tables: {[t[0] for t in tables]}")
+        table_names = [t[0] for t in tables]
+        logger.info(f"Database initialized. Tables: {', '.join(table_names)}")

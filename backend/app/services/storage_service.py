@@ -1,10 +1,13 @@
-from typing import Optional, BinaryIO
+from typing import Optional, BinaryIO, Tuple
 from pathlib import Path
 # import boto3  # Removed - using local storage only
 # from google.cloud import storage as gcs_storage  # Commented out - using local storage
 from app.core.config import settings
+from app.core.logging_config import get_logger
 import aiofiles
 import uuid
+
+logger = get_logger(__name__)
 
 
 class StorageService:
@@ -40,40 +43,34 @@ class StorageService:
         file_content: bytes,
         file_name: str,
         session_id: str,
-        content_type: Optional[str] = None
-    ) -> str:
-        """Upload file to local storage and return path"""
-        file_id = str(uuid.uuid4())
+        content_type: Optional[str] = None,
+        file_id: Optional[str] = None
+    ) -> Tuple[str, str]:
+        """Upload file to local storage and return a tuple of (file_id, url).
+
+        If `file_id` is provided, use it for the stored filename so it matches the
+        database `File.file_id`. Otherwise generate a new UUID for the storage name.
+        Returns: (file_id, url)
+        """
+        if not file_id:
+            file_id = str(uuid.uuid4())
         file_key = f"{session_id}/{file_id}_{file_name}"
-        
-        # AWS S3 - Removed
-        # if self.s3_client:
-        #     # Upload to S3
-        #     self.s3_client.put_object(
-        #         Bucket=self.bucket_name,
-        #         Key=file_key,
-        #         Body=file_content,
-        #         ContentType=content_type or "application/octet-stream"
-        #     )
-        #     url = f"https://{self.bucket_name}.s3.{settings.AWS_REGION}.amazonaws.com/{file_key}"
-        #     return url
-        
-        # GCP Storage - Commented out
-        # elif self.gcs_client:
-        #     # Upload to GCS
-        #     bucket = self.gcs_client.bucket(self.bucket_name)
-        #     blob = bucket.blob(file_key)
-        #     blob.upload_from_string(file_content, content_type=content_type)
-        #     url = blob.public_url
-        #     return url
         
         # Local storage (default and only option now)
         local_path = Path(settings.UPLOAD_DIR) / session_id
         local_path.mkdir(exist_ok=True, parents=True)
         file_path = local_path / f"{file_id}_{file_name}"
-        async with aiofiles.open(file_path, 'wb') as f:
-            await f.write(file_content)
-        return str(file_path)
+        
+        try:
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(file_content)
+            # Return a URL path that can be served by the API's static files mount (/uploads/...)
+            uploads_dir_name = Path(settings.UPLOAD_DIR).name
+            url = f"/{uploads_dir_name}/{session_id}/{file_id}_{file_name}"
+            return file_id, url
+        except Exception as e:
+            logger.error(f"Error uploading file {file_name}: {e}", exc_info=True)
+            raise
     
     async def get_file_url(self, file_key: str, expires_in: int = 3600) -> str:
         """Get file path (local storage)"""
@@ -96,24 +93,25 @@ class StorageService:
         return file_key
     
     async def delete_file(self, file_key: str) -> bool:
-        """Delete file from local storage"""
+        """Delete file from local storage or by URL path"""
         try:
-            # AWS S3 - Removed
-            # if self.s3_client:
-            #     self.s3_client.delete_object(Bucket=self.bucket_name, Key=file_key)
-            # GCP Storage - Commented out
-            # elif self.gcs_client:
-            #     bucket = self.gcs_client.bucket(self.bucket_name)
-            #     blob = bucket.blob(file_key)
-            #     blob.delete()
-            # else:
             # Local storage
             file_path = Path(file_key)
+            if not file_path.exists():
+                # file_key might be a URL path like /uploads/session/file
+                uploads_dir_name = Path(settings.UPLOAD_DIR).name
+                if isinstance(file_key, str) and file_key.startswith(f"/{uploads_dir_name}/"):
+                    rel = file_key[len(f"/{uploads_dir_name}/"):]
+                    file_path = Path(settings.UPLOAD_DIR) / rel
+            
             if file_path.exists():
                 file_path.unlink()
-            return True
+                return True
+            else:
+                logger.warning(f"File not found for deletion: {file_key}")
+                return False
         except Exception as e:
-            print(f"Error deleting file: {e}")
+            logger.error(f"Error deleting file {file_key}: {e}", exc_info=True)
             return False
 
 

@@ -17,6 +17,10 @@ from app.models import models, schemas
 from app.services.llm_service import llm_service
 from app.services.workflow_service import workflow_service
 from app.models.schemas import ChatRequest, ChatResponse, MessageResponse, StreamingChunk
+from langchain_core.messages import SystemMessage
+from app.core.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -66,6 +70,34 @@ async def chat_endpoint(
         # Exclude the current message (it's the last one we just inserted)
         history = [{"role": str(msg.role), "content": str(msg.content)} for msg in history_messages[:-1]]
         
+        # Retrieve file records based on file_ids in the request
+        # Design: Files are saved locally with file_ids. If a file_id is referenced 
+        # in a chat message with the same session_id, that file is sent to the LLM.
+        file_records = []
+        if request.file_ids:
+            # Explicit file_ids provided: retrieve only those files that belong to this session
+            files_result = await db.execute(
+                select(models.File)
+                .where(models.File.file_id.in_(request.file_ids))
+                .where(models.File.session_id == session.session_id)  # Security: ensure file belongs to session
+            )
+            file_records = files_result.scalars().all()
+            logger.info(f"Retrieved {len(file_records)} file(s) for specified file_ids: {request.file_ids}")
+        else:
+            # No file_ids specified: include all files for this session (convenience feature)
+            # This allows users to reference uploaded files without explicitly passing file_ids
+            files_result = await db.execute(
+                select(models.File)
+                .where(models.File.session_id == session.session_id)
+                .order_by(models.File.uploaded_at.desc())
+            )
+            file_records = files_result.scalars().all()
+            if file_records:
+                logger.info(f"No file_ids provided, retrieved all {len(file_records)} file(s) for session")
+        
+        if file_records:
+            logger.info(f"Retrieved {len(file_records)} file(s) for chat request")
+        
         # Determine which models to call (Groq and Gemini)
         call_groq = should_call_groq(request.model_preferences)
         call_gemini = should_call_gemini(request.model_preferences)
@@ -75,7 +107,8 @@ async def chat_endpoint(
             user_query=request.message,
             session_id=str(session.session_id),
             model_preferences=request.model_preferences,
-            history=history
+            history=history,
+            file_records=list(file_records) if file_records else None
         )
         
         # Helper function to save assistant messages
@@ -202,12 +235,80 @@ async def chat_stream(websocket: WebSocket):
                         for msg in history_messages[:-1]
                     ]
                     
+                    # Retrieve file records - if file_ids provided, use those; otherwise get all session files
+                    file_records = []
+                    file_ids = request_data.get("file_ids", [])
+                    if file_ids:
+                        files_result = await db.execute(
+                            select(models.File)
+                            .where(models.File.file_id.in_(file_ids))
+                            .where(models.File.session_id == session.session_id)
+                        )
+                        file_records = files_result.scalars().all()
+                    else:
+                        # If no file_ids specified, get all files for this session
+                        files_result = await db.execute(
+                            select(models.File)
+                            .where(models.File.session_id == session.session_id)
+                            .order_by(models.File.uploaded_at.desc())
+                        )
+                        file_records = files_result.scalars().all()
+                    
+                    if file_records:
+                        logger.info(f"Retrieved {len(file_records)} file(s) for streaming chat request")
+                    
                     # Determine which models to call
                     call_groq = should_call_groq(model_preferences)
                     call_gemini = should_call_gemini(model_preferences)
                     
-                    # Prepare messages with history
-                    messages = llm_service.prepare_messages(message, history)
+                    # Prepare messages with files and history using workflow service
+                    system_prompt = """You are a helpful AI assistant. Provide clear, accurate, and conversational responses to user questions. 
+                    Answer questions directly and naturally - do not generate code unless explicitly requested. 
+                    For factual questions, provide straightforward answers based on your knowledge."""
+                    
+                    # Get RAG context
+                    from app.services.rag_service import rag_service
+                    context_results = await rag_service.search(message, k=5, session_id=str(session.session_id))
+                    context_text = None
+                    if context_results:
+                        context_parts = []
+                        for r in context_results:
+                            content = r["content"]
+                            metadata = r.get("metadata", {})
+                            file_name = metadata.get("file_name", "Unknown file")
+                            context_parts.append(f"[From {file_name}]\n{content}")
+                        context_text = f"""The following information is from documents uploaded by the user. Use this information to answer their question accurately and in detail.
+
+{chr(10).join(context_parts)}
+
+Based on the above context, answer the user's question: {message}"""
+                    
+                    # Prepare messages with files
+                    if file_records:
+                        file_messages = await workflow_service._prepare_files_for_llm(list(file_records), message)
+                        
+                        # For Gemini
+                        gemini_messages = []
+                        if context_text:
+                            gemini_messages.append(SystemMessage(content=context_text))
+                        elif system_prompt:
+                            gemini_messages.append(SystemMessage(content=system_prompt))
+                        gemini_messages.extend(file_messages["gemini"])
+                        
+                        # For Groq
+                        groq_messages = []
+                        if context_text:
+                            groq_messages.append(SystemMessage(content=context_text))
+                        elif system_prompt:
+                            groq_messages.append(SystemMessage(content=system_prompt))
+                        groq_messages.extend(file_messages["groq"])
+                    else:
+                        # No files, use standard messages
+                        messages = llm_service.prepare_messages(message, history, system_prompt)
+                        if context_text:
+                            messages.insert(0, SystemMessage(content=context_text))
+                        gemini_messages = messages
+                        groq_messages = messages
                     
                     # Store session_id in a variable for closure
                     current_session_id = str(session.session_id)
@@ -257,7 +358,7 @@ async def chat_stream(websocket: WebSocket):
                             _stream_model(
                                 get_groq_model_name(),
                                 groq_message_id,
-                                llm_service.call_gpt(messages, stream=True),
+                                llm_service.call_gpt(groq_messages, stream=True),
                                 groq_response_content
                             )
                         ))
@@ -267,7 +368,7 @@ async def chat_stream(websocket: WebSocket):
                             _stream_model(
                                 get_gemini_model_name(),
                                 gemini_message_id,
-                                llm_service.call_gemini(messages, stream=True),
+                                llm_service.call_gemini(gemini_messages, stream=True),
                                 gemini_response_content
                             )
                         ))
