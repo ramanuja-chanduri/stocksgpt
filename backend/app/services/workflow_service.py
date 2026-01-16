@@ -72,7 +72,7 @@ class WorkflowService:
             context_parts.append(f"[From {file_name}]\n{content}")
         
         context_text = "\n\n---\n\n".join(context_parts)
-        return f"""The following information is from documents uploaded by the user. Use this information to answer their question accurately and in detail.
+        return f"""The following information is from documents uploaded by the user. Use this information to answer their question accurately.
 
 {context_text}
 
@@ -214,11 +214,7 @@ Based on the above context, answer the user's question: {query}"""
                         "data": image_base64
                     })
                     logger.info(f"Loaded image file: {file_record.file_name} ({len(file_content)} bytes)")
-            elif file_ext == '.pdf':
-                # For PDFs, we'll include a note that it was uploaded
-                # The RAG system should have already processed it
-                text_content += f"\n\n[Note: A PDF file '{file_record.file_name}' has been uploaded and processed. You can reference its content in your response.]"
-        
+
         # Prepare Gemini messages (supports multimodal)
         if image_parts:
             # Create multimodal message with text and images for Gemini
@@ -267,7 +263,7 @@ Based on the above context, answer the user's question: {query}"""
         """Execute workflow"""
         # Prepare messages with a more general system prompt
         system_prompt = """You are a helpful AI assistant. Provide clear, accurate, and conversational responses to user questions. 
-        Answer questions directly and naturally - do not generate code unless explicitly requested. 
+        Answer questions directly and naturally - do not generate information if you are unaware of the information. 
         For factual questions, provide straightforward answers based on your knowledge."""
         
         # Prepare base messages

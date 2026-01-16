@@ -2,27 +2,10 @@ from typing import List, Optional, AsyncIterator, Dict, Any
 # from langchain_openai import ChatOpenAI  # Disabled - using Groq instead
 from langchain_groq import ChatGroq
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain_core.messages import HumanMessage, SystemMessage, BaseMessage
+from langchain_core.messages import HumanMessage, SystemMessage, AIMessage,BaseMessage
 from langchain_core.callbacks import AsyncCallbackHandler
 from app.core.config import settings
 import json
-
-
-class StreamingCallbackHandler(AsyncCallbackHandler):
-    """Callback handler for streaming responses"""
-    def __init__(self):
-        self.tokens = []
-        self.finished = False
-    
-    async def on_llm_new_token(self, token: str, **kwargs: Any) -> None:
-        self.tokens.append(token)
-    
-    async def on_llm_end(self, response, **kwargs: Any) -> None:
-        self.finished = True
-    
-    def get_content(self) -> str:
-        return "".join(self.tokens)
-
 
 class LLMService:
     """Service for managing LLM interactions"""
@@ -39,7 +22,7 @@ class LLMService:
             self.groq_llm = ChatGroq(
                 model=settings.GROQ_MODEL,
                 temperature=0.7,
-                api_key=settings.GROQ_API_KEY,  # type: ignore
+                api_key=settings.GROQ_API_KEY,
                 streaming=True
             )
         
@@ -47,7 +30,7 @@ class LLMService:
             self.gemini_llm = ChatGoogleGenerativeAI(
                 model=settings.GEMINI_MODEL,
                 temperature=0.7,
-                api_key=settings.GEMINI_API_KEY,  # type: ignore
+                api_key=settings.GEMINI_API_KEY,
                 streaming=True
             )
         
@@ -199,9 +182,7 @@ class LLMService:
                 if role == "user":
                     messages.append(HumanMessage(content=content))
                 else:
-                    # For assistant messages, we'll use HumanMessage for simplicity
-                    # In production, you might want to use AIMessage
-                    messages.append(HumanMessage(content=f"Previous response: {content}"))
+                    messages.append(AIMessage(content=content))
         
         # Add current user message
         messages.append(HumanMessage(content=user_message))

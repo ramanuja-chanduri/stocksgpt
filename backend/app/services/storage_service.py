@@ -43,18 +43,13 @@ class StorageService:
         file_content: bytes,
         file_name: str,
         session_id: str,
-        content_type: Optional[str] = None,
-        file_id: Optional[str] = None
+        content_type: Optional[str] = None
     ) -> Tuple[str, str]:
-        """Upload file to local storage and return a tuple of (file_id, url).
-
-        If `file_id` is provided, use it for the stored filename so it matches the
-        database `File.file_id`. Otherwise generate a new UUID for the storage name.
-        Returns: (file_id, url)
         """
-        if not file_id:
-            file_id = str(uuid.uuid4())
-        file_key = f"{session_id}/{file_id}_{file_name}"
+        Upload file to local storage and return a tuple of (file_id, url).
+        """
+        
+        file_id = str(uuid.uuid4())
         
         # Local storage (default and only option now)
         local_path = Path(settings.UPLOAD_DIR) / session_id
