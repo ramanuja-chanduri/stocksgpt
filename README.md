@@ -1,16 +1,17 @@
 # StocksGPT - Financial Analysis Assistant
 
-A full-stack web application that provides a unified chat interface for querying both GPT-4o and Gemini 2.0 Flash simultaneously, with a focus on stock market and financial analysis. The app supports multimodal inputs (text, images, PDFs) and implements RAG-based search with financial data tools.
+A full-stack web application that provides a unified chat interface for querying both Groq (Llama-4) and Google Gemini, with a focus on stock market and financial analysis. The app supports multimodal inputs (text, images, PDFs) and implements RAG-based search with financial data tools.
 
 ## Features
 
-- 🤖 **Dual LLM Support**: Query GPT-4o and Gemini 2.0 Flash side-by-side
+- 🤖 **Dual LLM Support**: Query Groq (Meta Llama-4 Scout) and Google Gemini-3 Flash side-by-side
 - 📊 **Financial Analysis**: Real-time stock data, technical indicators, and financial metrics
 - 📁 **Multimodal Input**: Support for text, images (JPG, PNG, WEBP), and PDFs
 - 🔍 **RAG Integration**: Vector store with semantic search for relevant context
 - 💬 **Session Management**: Chat history organized by sessions
 - 🚀 **Streaming Responses**: Real-time streaming via WebSocket
 - 📱 **Responsive Design**: Modern UI that works on desktop and mobile
+- 🔧 **Financial Tools**: Stock quotes, technical indicators, web search, and financial metrics
 
 ## Tech Stack
 
@@ -19,9 +20,10 @@ A full-stack web application that provides a unified chat interface for querying
 - **LangChain & LangGraph** - LLM orchestration and agent workflows
 - **SQLAlchemy** - Async database ORM
 - **SQLite** - Database (easily switchable to PostgreSQL)
-- **FAISS** - Vector store for RAG
+- **Pinecone** - Vector store for RAG
 - **yfinance** - Stock market data
-- **AWS S3 / GCP Storage** - File storage
+- **Google Cloud Storage** - File storage support (need to be implemented)
+- **Tavily Search** - Web search capabilities (optional)
 
 ### Frontend
 - **React 18** - UI library
@@ -63,10 +65,11 @@ stocksGPT/
 - Python 3.10+
 - Node.js 18+
 - API Keys:
-  - OpenAI API key (for GPT-4o)
-  - Google API key (for Gemini 2.0 Flash)
+  - Groq API key (for Llama-4 Scout model) - **Required**
+  - Google API key (for Gemini-3 Flash model) - **Required**
+  -  Pinecone API key (for vector store) - **Required**
   - (Optional) Tavily API key (for web search)
-  - (Optional) AWS S3 or GCP credentials (for file storage)
+  - (Optional) Google Cloud credentials (for GCP file storage)
 
 ### Backend Setup
 
@@ -98,12 +101,10 @@ stocksGPT/
    ```
    Edit `.env` and add your API keys:
    ```env
-   OPENAI_API_KEY=your_openai_key
-   GEMINI_API_KEY=your_gemini_key
-   TAVILY_API_KEY=your_tavily_key  # Optional
-   AWS_ACCESS_KEY_ID=your_aws_key  # Optional for file storage
-   AWS_SECRET_ACCESS_KEY=your_aws_secret
-   S3_BUCKET_NAME=your_bucket_name
+   GROQ_API_KEY=your_groq_api_key
+   GEMINI_API_KEY=your_google_api_key
+   PINECONE_API_KEY=your_pinecone_key
+   TAVILY_API_KEY=your_tavily_key  # Optional for web search
    ```
 
 5. **Run the backend:**
@@ -144,11 +145,17 @@ stocksGPT/
 
 3. **Create a new session** or select an existing one from the sidebar
 
-4. **Choose which models to query** using the toggle buttons (GPT-4o, Gemini 2.0, or both)
+4. **Choose which models to query** using the toggle buttons (Groq Llama-4, Gemini-3, or both)
 
 5. **Ask questions** about stocks, financial analysis, or upload files for analysis
 
 6. **View responses** side-by-side from both models
+
+7. **Use financial tools** in your queries:
+   - Stock quotes: Ask for current price, market cap, P/E ratio, etc.
+   - Technical analysis: Request RSI, MACD, or moving averages
+   - Company info: Get financial metrics and fundamentals
+   - News: Get latest market news and updates (requires Tavily API)
 
 ## API Endpoints
 
@@ -188,12 +195,12 @@ The application includes several financial analysis tools:
 
 Key configuration options in `backend/app/core/config.py`:
 
-- `GPT_MODEL`: OpenAI model to use (default: `gpt-4o`)
-- `GEMINI_MODEL`: Google model to use (default: `gemini-2.0-flash-exp`)
+- `GROQ_MODEL`: Groq model to use (default: `meta-llama/llama-4-scout-17b-16e-instruct`)
+- `GEMINI_MODEL`: Google model to use (default: `gemini-3-flash-preview`)
 - `MAX_FILE_SIZE`: Maximum file upload size (default: 20MB)
 - `SESSION_TIMEOUT_HOURS`: Session timeout period (default: 24 hours)
-- `VECTOR_STORE_PATH`: Path to store vector embeddings
-- `USE_GCP`: Set to `true` to use Google Cloud Storage instead of AWS S3
+- `EMBEDDING_MODEL`: Embedding model for RAG (default: `models/gemini-embedding-001`)
+- `PINECONE_INDEX_NAME`: Pinecone index for vector store (default: `stocks-gpt-index`)
 
 ### Frontend Configuration
 
@@ -287,7 +294,9 @@ MIT License
 
 ## Acknowledgments
 
-- OpenAI for GPT-4o
-- Google for Gemini 2.0 Flash
+- Groq for the Llama-4 Scout model inference platform
+- Google for Gemini-3 Flash
+- Meta for Llama models
 - LangChain team for excellent LLM orchestration tools
 - yfinance for stock market data
+- Tavily for web search capabilities
