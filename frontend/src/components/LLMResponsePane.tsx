@@ -1,4 +1,3 @@
-import React from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
@@ -11,7 +10,7 @@ interface LLMResponsePaneProps {
   content: string;
   isLoading: boolean;
   error?: string;
-  model: 'gpt-4o' | 'gemini-2.0-flash';
+  model: string;
 }
 
 export const LLMResponsePane: React.FC<LLMResponsePaneProps> = ({
@@ -22,7 +21,7 @@ export const LLMResponsePane: React.FC<LLMResponsePaneProps> = ({
   model,
 }) => {
   const getModelColor = () => {
-    return model === 'gpt-4o' ? 'border-green-500' : 'border-blue-500';
+    return model.includes('llama') || model.includes('groq') ? 'border-green-500' : 'border-blue-500';
   };
 
   return (

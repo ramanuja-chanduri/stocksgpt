@@ -1,5 +1,5 @@
-import React, { useState, useRef } from 'react';
-import { Send, X } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { Send } from 'lucide-react';
 import { FileUpload } from './FileUpload';
 import { cn } from '../utils/cn';
 

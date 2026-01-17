@@ -1,5 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import SplitPane from 'react-split-pane';
+import { useState, useEffect, useRef } from 'react';
 import { LLMResponsePane } from './LLMResponsePane';
 import { SearchBar } from './SearchBar';
 import { Message, FileUpload as FileUploadType, StreamingChunk } from '../types';
@@ -40,7 +39,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
 
   // Connect WebSocket once for streaming
   useEffect(() => {
-    const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+    const apiBase = (import.meta.env as any).VITE_API_URL || 'http://localhost:8000';
     const wsUrl = apiBase.replace(/^http/, 'ws') + '/api/chat/stream';
     wsClient.connect(wsUrl);
 
@@ -186,7 +185,7 @@ export const ChatInterface: React.FC<ChatInterfaceProps> = ({
         {/* Display conversation history */}
         {messages
           .filter(msg => msg.role === 'user')
-          .map((userMsg, idx) => {
+          .map((userMsg) => {
             const responses = messages.filter(
               m => m.created_at > userMsg.created_at && m.role.startsWith('assistant')
             );
