@@ -103,6 +103,7 @@ Based on the above context, answer the user's question: {query}"""
                 response_chunks.append(chunk)
             return "".join(response_chunks)
         except Exception as e:
+            logger.error(f"Model call error: {e}", exc_info=True)
             return f"Error: {str(e)}"
     
     async def _call_gpt_node(self, state: WorkflowState) -> Dict[str, Any]:
@@ -176,7 +177,10 @@ Based on the above context, answer the user's question: {query}"""
         file_records: Any,  # Accept any sequence of file records
         user_query: str
     ) -> Dict[str, List[BaseMessage]]:
-        """Prepare messages with files for different models"""
+        """Prepare messages with files for different models
+        
+        OPTIMIZATION: Only loads image files, skips non-image files
+        """
         # Separate messages for different models (some may not support images)
         groq_messages = []
         gemini_messages = []
@@ -184,68 +188,73 @@ Based on the above context, answer the user's question: {query}"""
         # Prepare base text message
         text_content = user_query
         
-        # Load image files and prepare multimodal content
-        image_parts = []
-        for file_record in file_records:
-            file_ext = Path(file_record.file_name).suffix.lower()
-            is_image = file_ext in ['.jpg', '.jpeg', '.png', '.webp']
+        # Filter for image files first to avoid unnecessary I/O
+        image_files = [
+            f for f in file_records 
+            if Path(f.file_name).suffix.lower() in ['.jpg', '.jpeg', '.png', '.webp']
+        ]
+        
+        if not image_files:
+            # No images, return simple text messages
+            logger.debug("No image files to load")
+            return {
+                "groq": [HumanMessage(content=text_content)],
+                "gemini": [HumanMessage(content=text_content)]
+            }
+        
+        # Load image files in parallel for better performance
+        async def load_image(file_record):
+            file_content = await self._load_file_content(file_record.cloud_url)
+            if not file_content:
+                return None
             
-            if is_image:
-                # Load image content
-                file_content = await self._load_file_content(file_record.cloud_url)
-                if file_content:
-                    # Encode image as base64
-                    image_base64 = base64.b64encode(file_content).decode('utf-8')
-                    
-                    # Determine MIME type
-                    mime_type_map = {
-                        '.jpg': 'image/jpeg',
-                        '.jpeg': 'image/jpeg',
-                        '.png': 'image/png',
-                        '.webp': 'image/webp'
-                    }
-                    mime_type = mime_type_map.get(file_ext, 'image/jpeg')
-                    
-                    # For Gemini: use multimodal format (LangChain format)
-                    image_parts.append({
-                        "type": "image",
-                        "source_type": "base64",
-                        "mime_type": mime_type,
-                        "data": image_base64
-                    })
-                    logger.info(f"Loaded image file: {file_record.file_name} ({len(file_content)} bytes)")
+            file_ext = Path(file_record.file_name).suffix.lower()
+            mime_type_map = {
+                '.jpg': 'image/jpeg',
+                '.jpeg': 'image/jpeg',
+                '.png': 'image/png',
+                '.webp': 'image/webp'
+            }
+            mime_type = mime_type_map.get(file_ext, 'image/jpeg')
+            image_base64 = base64.b64encode(file_content).decode('utf-8')
+            
+            logger.info(f"Loaded image: {file_record.file_name} ({len(file_content)} bytes)")
+            return {
+                "type": "image",
+                "source_type": "base64",
+                "mime_type": mime_type,
+                "data": image_base64
+            }
+        
+        # Load all images in parallel
+        image_parts = await asyncio.gather(*[load_image(f) for f in image_files])
+        image_parts = [p for p in image_parts if p is not None]  # Filter out None values
+        
+        if not image_parts:
+            # No images were successfully loaded
+            return {
+                "groq": [HumanMessage(content=text_content)],
+                "gemini": [HumanMessage(content=text_content)]
+            }
 
         # Prepare Gemini messages (supports multimodal)
-        if image_parts:
-            # Create multimodal message with text and images for Gemini
-            gemini_content: List[Any] = [{"type": "text", "text": text_content}] + image_parts
-            gemini_messages.append(HumanMessage(content=gemini_content))
-        else:
-            gemini_messages.append(HumanMessage(content=text_content))
+        gemini_content: List[Any] = [{"type": "text", "text": text_content}] + image_parts
+        gemini_messages.append(HumanMessage(content=gemini_content))
 
-        # Prepare Groq/Llama messages: many providers (Groq/Llama) expect
-        # image parts as `image_url` entries. Convert base64 image parts to
-        # data-URL `image_url` objects so the Groq API accepts them.
-        if image_parts:
-            groq_image_parts: List[Any] = []
-            for p in image_parts:
-                # If part is base64-encoded, convert to data URL
-                if p.get("source_type") == "base64" and p.get("data"):
-                    mime = p.get("mime_type", "image/jpeg")
-                    data_b64 = p.get("data")
-                    data_url = f"data:{mime};base64,{data_b64}"
-                    groq_image_parts.append({
-                        "type": "image_url",
-                        "image_url": {"url": data_url}
-                    })
-                else:
-                    # Fallback: pass through existing part
-                    groq_image_parts.append(p)
+        # Prepare Groq/Llama messages: convert base64 image parts to data-URL format
+        groq_image_parts: List[Any] = []
+        for p in image_parts:
+            if p.get("source_type") == "base64" and p.get("data"):
+                mime = p.get("mime_type", "image/jpeg")
+                data_b64 = p.get("data")
+                data_url = f"data:{mime};base64,{data_b64}"
+                groq_image_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": data_url}
+                })
 
-            groq_content: List[Any] = [{"type": "text", "text": text_content}] + groq_image_parts
-            groq_messages.append(HumanMessage(content=groq_content))
-        else:
-            groq_messages.append(HumanMessage(content=text_content))
+        groq_content: List[Any] = [{"type": "text", "text": text_content}] + groq_image_parts
+        groq_messages.append(HumanMessage(content=groq_content))
         
         return {
             "groq": groq_messages,
@@ -256,11 +265,18 @@ Based on the above context, answer the user's question: {query}"""
         self,
         user_query: str,
         session_id: str,
+        file_ids: Optional[List[str]],
         model_preferences: List[str],
         history: Optional[List[Dict[str, str]]] = None,
         file_records: Optional[List[Any]] = None
     ) -> Dict[str, Any]:
-        """Execute workflow"""
+        """Execute workflow with optimized RAG and parallel processing
+        
+        OPTIMIZATIONS:
+        1. Only run RAG if it's available and likely to have relevant data
+        2. Prepare file messages and RAG context in parallel
+        3. Call models in parallel
+        """
         # Prepare messages with a more general system prompt
         system_prompt = """You are a helpful AI assistant. Provide clear, accurate, and conversational responses to user questions. 
         Answer questions directly and naturally - do not generate information if you are unaware of the information. 
@@ -269,31 +285,52 @@ Based on the above context, answer the user's question: {query}"""
         # Prepare base messages
         base_messages = llm_service.prepare_messages(user_query, history, system_prompt)
         
-        # Retrieve context using RAG and add to messages, filtered by session_id
-        context_results = await rag_service.search(user_query, k=5, session_id=session_id)
-        context_text = self._prepare_rag_context(user_query, context_results)
-        
-        # Prepare messages with files if provided
-        if file_records:
-            file_messages = await self._prepare_files_for_llm(file_records, user_query)
+        async def get_rag_context():
+            """Get RAG context only if service is available"""
+            if not rag_service.is_available():
+                return None
             
-            # For Gemini: combine system prompt, context, and file messages
+            # Use file_ids filter if provided, otherwise session_id
+            context_results = await rag_service.search(
+                user_query, 
+                k=5, 
+                session_id=session_id,
+                file_ids=file_ids
+            )
+            return self._prepare_rag_context(user_query, context_results)
+        
+        async def get_file_messages():
+            """Prepare file messages if files are provided"""
+            if not file_records:
+                return None
+            return await self._prepare_files_for_llm(file_records, user_query)
+        
+        # Execute RAG and file preparation in parallel
+        context_text, file_messages = await asyncio.gather(
+            get_rag_context(),
+            get_file_messages(),
+            return_exceptions=False
+        )
+        
+        # Prepare messages based on available data
+        if file_messages:
+            # We have files - prepare model-specific messages
             gemini_messages = []
+            groq_messages = []
+            
+            # Add context or system prompt
             if context_text:
                 gemini_messages.append(SystemMessage(content=context_text))
-            elif system_prompt:
-                gemini_messages.append(SystemMessage(content=system_prompt))
-            gemini_messages.extend(file_messages["gemini"])
-            
-            # For Groq: combine system prompt, context, and text messages
-            groq_messages = []
-            if context_text:
                 groq_messages.append(SystemMessage(content=context_text))
             elif system_prompt:
+                gemini_messages.append(SystemMessage(content=system_prompt))
                 groq_messages.append(SystemMessage(content=system_prompt))
+            
+            # Add file messages
+            gemini_messages.extend(file_messages["gemini"])
             groq_messages.extend(file_messages["groq"])
         else:
-            # No files, use standard messages
+            # No files - use standard messages
             messages = base_messages.copy()
             if context_text:
                 messages.insert(0, SystemMessage(content=context_text))
@@ -304,7 +341,6 @@ Based on the above context, answer the user's question: {query}"""
         call_groq = should_call_groq(model_preferences)
         call_gemini = should_call_gemini(model_preferences)
         
-        # Call both models in parallel
         async def call_groq_model():
             if not call_groq:
                 return None

@@ -14,17 +14,6 @@ class Settings(BaseSettings):
     GEMINI_API_KEY: str = os.environ["GEMINI_API_KEY"]  # Google API key for Gemini model
     # OPENAI_API_KEY: str = ""  # Disabled - using Groq instead
     
-    # Cloud Storage - Disabled, using local storage only
-    # AWS_ACCESS_KEY_ID: str = ""  # Removed - using local storage
-    # AWS_SECRET_ACCESS_KEY: str = ""  # Removed - using local storage
-    # AWS_REGION: str = "us-east-1"  # Removed - using local storage
-    # S3_BUCKET_NAME: str = ""  # Removed - using local storage
-    
-    # Alternative: GCP Storage - Commented out, using local storage
-    # GCP_PROJECT_ID: str = ""
-    # GCP_STORAGE_BUCKET: str = ""
-    # USE_GCP: bool = False  # Set to True to use GCP instead of AWS
-    
     # API Keys for Tools
     TAVILY_API_KEY: str = ""
     ALPHA_VANTAGE_KEY: str = ""
@@ -46,8 +35,9 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "./uploads"
     
     # Vector Store
-    VECTOR_STORE_PATH: str = "./vectorstore"
     EMBEDDING_MODEL: str = "models/gemini-embedding-001"  # Google Gemini embedding model
+    PINECONE_API_KEY: str = os.getenv("PINECONE_API_KEY", "")
+    PINECONE_INDEX_NAME: str = "stocks-gpt-index"
     
     # Session Management
     SESSION_TIMEOUT_HOURS: int = 24
@@ -58,8 +48,6 @@ class Settings(BaseSettings):
     # GPT_MODEL: str = "gpt-4o"  # Disabled - using Groq instead
     
     class Config:
-        # Also allow pydantic-settings to read from environment variables
-        # (which will include values loaded from .env by dotenv above)
         env_file_encoding = "utf-8"
         case_sensitive = True
         extra = "ignore"
@@ -69,4 +57,3 @@ settings = Settings()
 
 # Create necessary directories
 Path(settings.UPLOAD_DIR).mkdir(exist_ok=True, parents=True)
-Path(settings.VECTOR_STORE_PATH).mkdir(exist_ok=True, parents=True)

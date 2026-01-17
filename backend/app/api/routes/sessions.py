@@ -7,6 +7,8 @@ from datetime import datetime, timedelta
 from app.core.database import get_db
 from app.models import models, schemas
 from app.core.config import settings
+from app.services.storage_service import storage_service
+from app.services.rag_service import rag_service
 
 router = APIRouter()
 
@@ -72,11 +74,37 @@ async def delete_session(
     session = result.scalar_one_or_none()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
-    
+    # Delete associated files from storage and vector DB
+    files_result = await db.execute(
+        select(models.File).where(models.File.session_id == session_id)
+    )
+    files = files_result.scalars().all()
+    for f in files:
+        # delete storage file
+        try:
+            file_path = str(f.cloud_url) if f.cloud_url else None
+            if file_path:
+                await storage_service.delete_file(file_path)
+        except Exception:
+            pass
+        # delete embeddings for this file
+        try:
+            rag_service.delete_by_file(f.file_id)
+        except Exception:
+            pass
+
+    # Delete session (will cascade delete files/messages)
     await db.execute(
         delete(models.Session).where(models.Session.session_id == session_id)
     )
     await db.commit()
+
+    # Ensure any remaining vectors for the session are removed
+    try:
+        rag_service.delete_by_session(session_id)
+    except Exception:
+        pass
+
     return {"message": "Session deleted successfully"}
 
 
@@ -113,9 +141,29 @@ async def cleanup_old_sessions(db: AsyncSession = Depends(get_db)):
     old_sessions = result.scalars().all()
     
     for session in old_sessions:
+        # remove files from storage and vector DB first
+        files_result = await db.execute(
+            select(models.File).where(models.File.session_id == session.session_id)
+        )
+        files = files_result.scalars().all()
+        for f in files:
+            try:
+                if f.cloud_url:
+                    await storage_service.delete_file(str(f.cloud_url))
+            except Exception:
+                pass
+            try:
+                rag_service.delete_by_file(f.file_id)
+            except Exception:
+                pass
+
         await db.execute(
             delete(models.Session).where(models.Session.session_id == session.session_id)
         )
+        try:
+            rag_service.delete_by_session(session.session_id)
+        except Exception:
+            pass
     
     await db.commit()
     return {"message": f"Cleaned up {len(old_sessions)} old sessions"}

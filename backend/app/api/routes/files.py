@@ -8,6 +8,7 @@ from pathlib import Path
 from app.core.database import get_db
 from app.models import models, schemas
 from app.services.storage_service import storage_service
+from app.services.rag_service import rag_service
 from app.core.security import validate_file_type, sanitize_filename
 from app.core.config import settings
 from app.core.logging_config import get_logger
@@ -211,7 +212,14 @@ async def delete_file(
             logger.warning(f"Failed to delete file from storage: {file_path}")
     else:
         logger.warning(f"File record {file_id} has no cloud_url/path, skipping storage deletion")
-    
+            
+    try:
+        rag_deleted = rag_service.delete_by_file(file_id)
+        if rag_deleted:
+            logger.info(f"Deleted embeddings for file {file_id} from vector DB")
+    except Exception as e:
+        logger.warning(f"Error deleting embeddings for file {file_id}: {e}")
+
     # Delete from database
     await db.delete(file_record)
     await db.commit()

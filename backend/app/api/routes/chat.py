@@ -106,6 +106,7 @@ async def chat_endpoint(
         workflow_result = await workflow_service.execute(
             user_query=request.message,
             session_id=str(session.session_id),
+            file_ids=request.file_ids,
             model_preferences=request.model_preferences,
             history=history,
             file_records=list(file_records) if file_records else None
@@ -245,6 +246,7 @@ async def chat_stream(websocket: WebSocket):
                             .where(models.File.session_id == session.session_id)
                         )
                         file_records = files_result.scalars().all()
+                        logger.info(f"Retrieved {len(file_records)} file(s) for specified file_ids")
                     else:
                         # If no file_ids specified, get all files for this session
                         files_result = await db.execute(
@@ -253,40 +255,64 @@ async def chat_stream(websocket: WebSocket):
                             .order_by(models.File.uploaded_at.desc())
                         )
                         file_records = files_result.scalars().all()
-                    
-                    if file_records:
-                        logger.info(f"Retrieved {len(file_records)} file(s) for streaming chat request")
+                        if file_records:
+                            logger.info(f"No file_ids, retrieved all {len(file_records)} file(s)")
                     
                     # Determine which models to call
                     call_groq = should_call_groq(model_preferences)
                     call_gemini = should_call_gemini(model_preferences)
                     
-                    # Prepare messages with files and history using workflow service
+                    # Prepare system prompt
                     system_prompt = """You are a helpful AI assistant. Provide clear, accurate, and conversational responses to user questions. 
                     Answer questions directly and naturally - do not generate code unless explicitly requested. 
                     For factual questions, provide straightforward answers based on your knowledge."""
                     
-                    # Get RAG context
+                    # Prepare RAG context and file messages in parallel
                     from app.services.rag_service import rag_service
-                    context_results = await rag_service.search(message, k=5, session_id=str(session.session_id))
-                    context_text = None
-                    if context_results:
+                    
+                    async def get_rag_context():
+                        """Get RAG context only if available"""
+                        if not rag_service.is_available():
+                            return None
+                        
+                        context_results = await rag_service.search(
+                            message, 
+                            k=5, 
+                            session_id=str(session.session_id),
+                            file_ids=file_ids if file_ids else None
+                        )
+                        
+                        if not context_results:
+                            return None
+                        
                         context_parts = []
                         for r in context_results:
                             content = r["content"]
                             metadata = r.get("metadata", {})
                             file_name = metadata.get("file_name", "Unknown file")
                             context_parts.append(f"[From {file_name}]\n{content}")
-                        context_text = f"""The following information is from documents uploaded by the user. Use this information to answer their question accurately and in detail.
+                        
+                        return f"""The following information is from documents uploaded by the user. Use this information to answer their question accurately and in detail.
 
 {chr(10).join(context_parts)}
 
 Based on the above context, answer the user's question: {message}"""
                     
-                    # Prepare messages with files
-                    if file_records:
-                        file_messages = await workflow_service._prepare_files_for_llm(list(file_records), message)
-                        
+                    async def prepare_file_msgs():
+                        """Prepare file messages if files exist"""
+                        if not file_records:
+                            return None
+                        return await workflow_service._prepare_files_for_llm(list(file_records), message)
+                    
+                    # Execute in parallel
+                    context_text, file_messages = await asyncio.gather(
+                        get_rag_context(),
+                        prepare_file_msgs(),
+                        return_exceptions=False
+                    )
+                    
+                    # Prepare messages based on available data
+                    if file_messages:
                         # For Gemini
                         gemini_messages = []
                         if context_text:
@@ -330,6 +356,7 @@ Based on the above context, answer the user's question: {message}"""
                                     "done": False
                                 })
                         except Exception as e:
+                            logger.error(f"Streaming error for {model}: {e}", exc_info=True)
                             await websocket.send_json({
                                 "session_id": current_session_id,
                                 "message_id": message_id,
@@ -413,15 +440,17 @@ Based on the above context, answer the user's question: {message}"""
                     
                 except Exception as e:
                     await db.rollback()
+                    logger.error(f"WebSocket streaming error: {e}", exc_info=True)
                     await websocket.send_json({
                         "error": f"Database error: {str(e)}",
                         "session_id": session_id or "unknown"
                     })
                 
     except WebSocketDisconnect:
-        pass
+        logger.info("WebSocket disconnected")
     except Exception as e:
+        logger.error(f"WebSocket error: {e}", exc_info=True)
         try:
             await websocket.send_json({"error": str(e)})
         except:
-            pass  # WebSocket might already be closed
+            pass

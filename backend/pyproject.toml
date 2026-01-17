@@ -3,13 +3,12 @@ name = "stocksGPT"
 version = "0.1.0"
 description = "Multi AI Search interface for financial analysis"
 readme = "README.md"
-requires-python = ">=3.10.11"
+requires-python = ">=3.10,<3.13"
 dependencies = [
     "aiofiles>=25.1.0",
     "aiosqlite>=0.22.1",
     "base>=0.0.0",
     "boto3>=1.42.25",
-    "faiss-cpu>=1.13.2",
     "fastapi>=0.128.0",
     "filetype>=1.2.0",
     "google-cloud>=0.34.0",
@@ -19,6 +18,7 @@ dependencies = [
     "langchain-google-genai>=4.1.3",
     "langchain-groq>=1.1.1",
     "langchain-openai>=1.1.7",
+    "langchain-pinecone>=0.2.0",
     "pypdf>=6.6.0",
     "pypdf2>=3.0.1",
     "python-dotenv>=1.2.1",
